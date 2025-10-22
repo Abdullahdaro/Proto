@@ -1,0 +1,214 @@
+<!-- index.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0"
+  />
+  <title>Customer Sentiment Analyzer (TensorFlow.js)</title>
+  <!-- TensorFlow.js -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js"></script>
+  <!-- Papa Parse -->
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+  <style>
+    :root {
+      --bg:#0b1220; --card:#121a2b; --muted:#94a3b8; --text:#e2e8f0; --accent:#60a5fa; --good:#22c55e; --bad:#ef4444; --warn:#f59e0b;
+    }
+    html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial; }
+    h1, h2, h3 { margin: 0.4rem 0; }
+    a { color: var(--accent); }
+    .container { max-width: 1200px; margin: 0 auto; padding: 16px; }
+    .grid { display: grid; gap: 16px; }
+    .grid-cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .grid-cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .card { background: var(--card); border: 1px solid #1e293b; border-radius: 14px; padding: 16px; box-shadow: 0 10px 30px rgba(0,0,0,.25); }
+    .row { display:flex; gap:12px; flex-wrap: wrap; align-items: center; }
+    input, select, button, textarea {
+      background: #0f172a; color: var(--text);
+      border: 1px solid #1f2a44; border-radius: 10px; padding: 10px 12px; outline: none;
+    }
+    button { cursor: pointer; border: 1px solid #334155; }
+    button.primary { background: linear-gradient(135deg, #2563eb, #22c55e); border: none; }
+    button.warn { background: #b45309; }
+    .muted { color: var(--muted); font-size: 0.9rem; }
+    .pill { display:inline-flex; align-items:center; gap:6px; background:#0b1220; border:1px solid #1f2a44; border-radius:9999px; padding:6px 10px; }
+    .badge { font-size: 12px; padding: 2px 8px; border-radius: 9999px; background: #0b1220; border: 1px solid #334155; }
+    .good { color: var(--good) }
+    .bad { color: var(--bad) }
+    .scroll { overflow:auto; max-height: 360px; border:1px dashed #233052; border-radius: 10px; padding: 6px; }
+    table { width:100%; border-collapse: collapse; }
+    th, td { padding: 8px 10px; border-bottom: 1px solid #1f2a44; text-align: left; }
+    tr.correct { background: rgba(34,197,94,.08); }
+    tr.incorrect { background: rgba(239,68,68,.08); }
+    code.inline { background:#0b1220; border:1px solid #1f2a44; padding:2px 6px; border-radius:6px; }
+    .matrix { border-collapse: collapse; margin-top: 12px; }
+    .matrix th, .matrix td { border: 1px solid #1f2a44; padding: 10px 12px; text-align: center; }
+    .matrix .tp { background: rgba(34,197,94,.15); }
+    .matrix .tn { background: rgba(59,130,246,.15); }
+    .matrix .fp { background: rgba(245,158,11,.15); }
+    .matrix .fn { background: rgba(239,68,68,.15); }
+    .kpi { display:flex; gap:12px; flex-wrap: wrap; }
+    .kpi .card { min-width: 160px; text-align: center; }
+    .footer { margin-top:16px; font-size: 12px; color: var(--muted) }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>📊 Customer Sentiment Analyzer — <span class="muted">TensorFlow.js (Client-Only)</span></h1>
+    <div class="grid grid-cols-3">
+      <div class="card">
+        <h3>1) Load Data</h3>
+        <p class="muted">CSV must contain <code class="inline">review</code>, <code class="inline">sentiment</code> columns.</p>
+        <div class="row">
+          <input id="csvFile" type="file" accept=".csv,text/csv" />
+          <button id="btnLoad" class="primary">Parse CSV</button>
+        </div>
+        <div class="row" style="margin-top:10px;">
+          <label class="pill"><input id="removeStopwords" type="checkbox" /> Remove stopwords</label>
+          <label class="pill">Seq Len <input id="seqLen" type="number" min="20" max="400" step="10" value="100" style="width:90px" /></label>
+          <label class="pill">Max Vocab <input id="maxVocab" type="number" min="2000" max="50000" step="1000" value="20000" style="width:100px" /></label>
+        </div>
+        <div class="row" style="margin-top:10px;">
+          <label class="pill">Backend
+            <select id="backend">
+              <option value="webgl">webgl (GPU)</option>
+              <option value="cpu">cpu</option>
+              <option value="wasm">wasm</option>
+            </select>
+          </label>
+          <button id="btnSwitchBackend">Switch</button>
+        </div>
+        <p id="dataInfo" class="muted"></p>
+      </div>
+
+      <div class="card">
+        <h3>2) Train</h3>
+        <div class="row">
+          <label class="pill">Epochs <input id="epochs" type="number" min="1" max="30" value="5" style="width:80px" /></label>
+          <label class="pill">Batch Size <input id="batchSize" type="number" min="16" max="512" step="16" value="64" style="width:90px" /></label>
+          <label class="pill">Validation Split <input id="valSplit" type="number" min="0.05" max="0.4" step="0.05" value="0.1" style="width:90px" /></label>
+        </div>
+        <div class="row" style="margin-top:10px;">
+          <button id="btnTrain" class="primary">Start Training</button>
+          <button id="btnSave">Download Model</button>
+        </div>
+        <div class="row" style="margin-top:10px;">
+          <input id="modelFile" type="file" accept=".json" />
+          <button id="btnLoadModel">Load Model File</button>
+        </div>
+        <div style="margin-top:10px">
+          <canvas id="trainingChart" height="160"></canvas>
+        </div>
+        <div class="muted" id="trainStatus"></div>
+      </div>
+
+      <div class="card">
+        <h3>3) Evaluate & Predict</h3>
+        <div class="row">
+          <button id="btnEvaluate">Evaluate on Test Set</button>
+          <span id="evalCounts" class="badge"></span>
+        </div>
+
+        <div class="kpi" style="margin-top:10px;">
+          <div class="card"><div class="muted">Accuracy</div><div id="kpiAcc" style="font-size:24px;">—</div></div>
+          <div class="card"><div class="muted">Precision</div><div id="kpiPrec" style="font-size:24px;">—</div></div>
+          <div class="card"><div class="muted">Recall</div><div id="kpiRec" style="font-size:24px;">—</div></div>
+          <div class="card"><div class="muted">F1</div><div id="kpiF1" style="font-size:24px;">—</div></div>
+        </div>
+
+        <div style="margin-top:10px;">
+          <canvas id="metricsChart" height="160"></canvas>
+        </div>
+
+        <div style="margin-top:10px;">
+          <h4>Confusion Matrix</h4>
+          <table class="matrix">
+            <thead>
+              <tr><th></th><th colspan="2">Predicted</th></tr>
+              <tr><th>Actual</th><th>Negative (0)</th><th>Positive (1)</th></tr>
+            </thead>
+            <tbody>
+              <tr><th>Negative (0)</th><td id="cmTN" class="tn">0</td><td id="cmFP" class="fp">0</td></tr>
+              <tr><th>Positive (1)</th><td id="cmFN" class="fn">0</td><td id="cmTP" class="tp">0</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-2" style="margin-top:16px;">
+      <div class="card">
+        <h3>Per-Sample Predictions</h3>
+        <div class="scroll">
+          <table id="samplesTable">
+            <thead>
+              <tr><th>#</th><th>Review (truncated)</th><th>True</th><th>Pred</th><th>Prob</th></tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Try Your Own Text</h3>
+        <div class="row">
+          <textarea id="freeText" rows="6" style="width:100%;" placeholder="Type a review..."></textarea>
+        </div>
+        <div class="row" style="margin-top:10px;">
+          <button id="btnPredict">Predict</button>
+          <span class="badge">Prediction: <b id="freePred">—</b></span>
+          <span class="badge">Probability: <b id="freeProb">—</b></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Yandex Maps Analysis Section -->
+    <div class="card" style="margin-top:16px;">
+      <h3>🗺️ Yandex Maps Place Analysis</h3>
+      <p class="muted">Analyze comments from Yandex Maps places. Paste a Yandex Maps URL to extract, translate, and analyze comments.</p>
+      
+      <div class="row">
+        <input id="yandexUrl" type="url" placeholder="https://yandex.com.tr/maps/213/moscow/?ll=37.770330%2C55.669793..." style="flex: 1;" />
+        <button id="btnAnalyzeYandex" class="primary">Analyze Place</button>
+      </div>
+      
+      <div id="yandexResults" style="display: none; margin-top: 16px;">
+        <div class="grid grid-cols-2" style="margin-bottom: 16px;">
+          <div id="placeInfo" class="card"></div>
+          <div id="recommendationCard" class="card"></div>
+        </div>
+        
+        <div class="card">
+          <h4>📝 Comments Analysis</h4>
+          <div class="scroll">
+            <table id="commentsTable">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Comment</th>
+                  <th>Rating</th>
+                  <th>Sentiment</th>
+                  <th>Confidence</th>
+                  <th>Language</th>
+                  <th>Author</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="footer">
+      Fully client-side. Built with TensorFlow.js, PapaParse, and Chart.js. Deploy on GitHub Pages by committing these files.
+    </div>
+  </div>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
